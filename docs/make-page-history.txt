@@ -1,0 +1,43 @@
+Make current pages and immutable output history
+
+The default Make gallery lists the latest successfully published HTML revision
+for each actual task/producer lineage and exact relative workspace path.
+Different independent tasks and different directories do not merge merely
+because filenames match. Real task moves retain their publication lineage.
+Retiring a task or archiving its source channel does not itself delete a page.
+
+Every published revision keeps its content-derived artifact UUID, private
+snapshot, original message provenance and stable attached-output handle.
+Explicit /frame/artifacts?ids=... queries and direct historical links still
+resolve their own revisions; they do not silently become links to newer bytes.
+Default gallery search and favorites use current pages. Favoriting an older
+revision keeps the current revision in Favorites. Removing that favorite from
+a revision clears favorite markers for that same logical page.
+
+Publication sequence numbers determine the current revision even when clocks
+tie or the content genuinely rolls back to an earlier byte sequence. An
+idempotent tool retry does not advance that sequence. Legacy metadata migrates
+deterministically using actual producer, move, message and attachment order.
+
+Deleting a published page physically removes the expressly selected snapshot
+and its artifact metadata. That deleted UUID and its attached-output handles
+then return 404. A gallery deletion marker prevents older revisions of that
+same logical page from reappearing as a current tile. Other historical
+snapshots, independent tasks and the actual workspace source file are not
+bulk-deleted. This does not claim to erase every workspace file or every older
+message resource. A new successful publication may restore a current tile.
+Failed metadata writes or failed snapshot removal restore the selected page
+and its gallery visibility rather than treating a failed delete as success.
+Deletion markers retain the producer lineage verified at deletion, rather
+than attempting to reconstruct that identity from a session after it has
+been deleted. They can still follow subsequent real task moves. Old markers
+without a stored lineage migrate only when their original session, channel,
+reply, root, handle, path and canonical page reference identify an actual
+deleted output. Unverifiable legacy records do not gain authority to hide
+another producer's live page.
+
+Existing-page Make context includes the actual relative workspace path and
+selected immutable source. The model is instructed to edit that path unless
+the user explicitly asks for a separate copy. A separately created task is not
+automatically treated as the same producer merely because it edits a matching
+filename; broader source-lineage linking would need an explicit contract.

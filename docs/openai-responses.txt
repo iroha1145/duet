@@ -1,0 +1,63 @@
+OpenAI Responses and prompt caching
+
+Model profiles retain protocol=openai for both OpenAI APIs. Existing profiles
+default to api_mode=chat_completions. Select api_mode=responses for GPT-6 Luna
+reasoning with function tools. Recommended Luna configuration:
+
+  model: gpt-6-luna
+  api_mode: responses
+  reasoning_effort: high
+  prompt_cache_enabled: true
+  prompt_cache_mode: explicit
+  prompt_cache_ttl: 30m
+
+The server sends /responses, store:false, max_output_tokens and flat function
+tools with strict:false to preserve the existing optional argument schemas.
+Luna Chat Completions tool calling requires reasoning_effort=none; this is set
+when unspecified, and incompatible explicit effort is rejected. Anthropic and
+other existing Chat profiles keep their current API behavior.
+
+Responses caching uses prompt_cache_options (implicit/explicit, TTL 30m/12h).
+Explicit mode adds a breakpoint to the stable developer system-prompt block;
+an empty system prompt is rejected for explicit caching. Disabled caching sends
+explicit mode with no breakpoints. No artificial padding is added. A short or
+changed prefix may produce no hit. The opaque session routing key contains no
+credential or prompt. Cache options do not prove a cache hit.
+
+Usage comes from actual provider terminal counters, including on incomplete
+responses. input_tokens/output_tokens become the existing prompt/completion
+counters; cache reads, writes, TTL write breakdown and reasoning tokens remain
+separate documented counters. Cache writes are part of input, not extra input
+tokens. Missing counters remain absent. Responses terminal usage is collected
+even when the legacy Chat stream_usage_enabled preference is false: Responses
+does not use Chat's stream_options.include_usage setting.
+
+Successful response.output items are retained in their original array order
+in private assistant._responses state, including encrypted reasoning, phase,
+raw function arguments and call IDs. No previous_response_id is used. Private
+state survives the private SQLite store; public HTTP/event serialization strips
+it. It is replayed only with the same actual input prefix, model, endpoint, API,
+profile, credential fingerprint, reasoning effort and tool definitions. A
+changed prefix falls back to ordinary text/tool history. On an incompatible
+model/API/profile/key/schema run, private state is removed while human/tool
+history remains. Dynamic task/plugin prompts therefore cannot silently borrow
+reasoning from a different rendered context. Changing a provider's hidden
+server-side implementation behind an unchanged URL is outside this identity.
+
+Function calls are dispatched only after an authoritative completed response
+and argument validation. Failed, incomplete, interrupted, malformed or canceled
+streams never dispatch partial calls or commit their private continuation.
+Provider redirects and raw provider error messages are not relayed. Existing
+approval and tool authorization still apply.
+
+Local verification uses actual byte-chunked HTTP SSE, Service tool execution,
+SQLite reload, mode/key switches, images, usage, errors and cancellation. Real
+provider cache-hit and phone tests must be reported separately; local fixtures
+do not establish live model quality, provider pricing or cache-hit rates.
+
+Primary documentation checked 2026-11-15:
+https://developers.openai.com/api/docs/models/gpt-6-luna.md
+https://developers.openai.com/api/docs/guides/prompt-caching.md
+https://developers.openai.com/api/docs/guides/reasoning.md
+https://developers.openai.com/api/docs/guides/function-calling.md
+https://developers.openai.com/api/docs/guides/streaming-responses.md

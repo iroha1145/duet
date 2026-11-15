@@ -1,0 +1,10 @@
+aiohttp>=3.10,<4
+croniter>=3,<8
+Pillow>=10,<14
+pyzmq==27.3.0
+pypdf==7.1.0
+defusedxml==0.7.1
+python-docx==1.2.0
+python-pptx==1.0.2
+openpyxl==3.1.5
+google-auth[cryptography]==2.62.2
