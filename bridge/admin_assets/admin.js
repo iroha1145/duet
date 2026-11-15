@@ -8,6 +8,60 @@ let models = [];
 let editing = null;
 let modelBusy = false;
 let modelRead = 0;
+let editorType = 'openai';
+const textDrafts = new Map();
+const defaultBase = (type) => type === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1';
+const editorBusy = () => modelBusy || Object.values(audioSettings).some((state) => state.busy);
+function saveTextDraft() {
+  if (editorType === 'voice') return;
+  textDrafts.set(editorType, {editing, controls: [...modelForm.elements].filter((input) => input.matches('input, select, textarea')).map((input) => ({id: input.id, value: input.value, checked: input.checked, disabled: input.disabled})),
+    heading: byId('editor-heading').textContent, status: byId('model-status').textContent});
+}
+function switchEditor(type, focus = false) {
+  if (editorBusy()) return;
+  saveTextDraft();
+  editorType = type;
+  document.querySelector('input[name="editor_type"][value="'+type+'"]').checked = true;
+  if (type !== 'voice') {
+    const draft = textDrafts.get(type);
+    if (draft) {
+      editing = draft.editing;
+      for (const item of draft.controls) {
+        const input = byId(item.id);
+        input.value = item.value;
+        if (typeof item.checked === 'boolean') input.checked = item.checked;
+        input.disabled = item.disabled;
+        input.setCustomValidity('');
+        input.removeAttribute('aria-invalid');
+      }
+      byId('editor-heading').textContent = draft.heading;
+      byId('save-model').textContent = editing ? '保存更改' : '保存模型';
+      byId('cancel-edit').textContent = editing ? '取消编辑' : '清空草稿';
+      announce('model-status', draft.status);
+    } else { newModel(false); }
+    byId('model-protocol').value = type;
+    syncModelOptions();
+  } else byId('editor-heading').textContent = '语音配置';
+  syncEditor();
+  if (focus) byId('editor-heading').focus();
+}
+function syncEditor() {
+  const busy = editorBusy();
+  const voice = editorType === 'voice';
+  byId('editor-types').disabled = busy;
+  byId('audio-types').hidden = !voice;
+  byId('audio-types').disabled = !voice || busy;
+  modelForm.hidden = voice;
+  byId('model-fields').disabled = voice || modelBusy;
+  for (const kind of Object.keys(audioSettings)) lockAudio(kind);
+  for (const button of byId('models-list').querySelectorAll('button')) button.disabled = busy;
+  byId('new-model').disabled = busy;
+}
+function editAudio(kind) {
+  if (editorBusy()) return;
+  document.querySelector('input[name="audio_type"][value="'+kind+'"]').checked = true;
+  switchEditor('voice', true);
+}
 let deviceRead = 0;
 const audioSettings = {
   speech: {label: '语音转写', path: '/duet/speech/config', fields: ['base_url', 'model'], choice: 'language_format', options: ['legacy', 'languages'], read: 0, ready: false, busy: false},
@@ -100,10 +154,15 @@ function signedOut(message = '') {
   announce('usage-status');
   byId('password').value = '';
   modelForm.reset();
+  textDrafts.clear();
+  editorType = 'openai';
+  document.querySelector('input[name="editor_type"][value="openai"]').checked = true;
   for (const [kind, state] of Object.entries(audioSettings)) {
     state.read += 1;
     state.ready = false;
     state.busy = false;
+    state.dirty = false;
+    state.saved = null;
     byId(`${kind}-form`).reset();
     lockAudio(kind);
   }
@@ -173,7 +232,7 @@ function lockModels(locked) {
   modelBusy = locked;
   byId('model-fields').disabled = locked;
   for (const id of ['new-model', 'save-model', 'cancel-edit']) byId(id).disabled = locked;
-  for (const button of byId('models-list').querySelectorAll('button')) button.disabled = locked;
+  syncEditor();
 }
 
 function renderModels() {
@@ -186,7 +245,7 @@ function renderModels() {
     heading.append(element('h3', '', model.label));
     if (model.current) heading.append(element('span', 'badge', '正在使用'));
     item.append(heading,
-      element('p', 'model-meta', `${model.protocol === 'anthropic' ? 'Anthropic' : model.api_mode === 'responses' ? 'OpenAI Responses' : 'OpenAI Chat Completions'} 兼容 · ${model.model}`),
+      element('p', 'model-meta', `${model.protocol === 'anthropic' ? 'Claude 文本' : model.api_mode === 'responses' ? 'OpenAI 文本 · Responses' : 'OpenAI 文本 · Chat Completions'} · ID: ${model.model}`),
       element('p', 'model-meta', model.base_url),
       element('p', 'model-meta', model.has_key ? '服务器已保存密钥' : '未保存密钥'));
     const actions = element('div', 'item-actions');
@@ -196,7 +255,16 @@ function renderModels() {
     item.append(actions);
     list.append(item);
   }
-  for (const button of list.querySelectorAll('button')) button.disabled = modelBusy;
+  for (const [kind, state] of Object.entries(audioSettings)) {
+    const item = element('article', 'model-item');
+    item.append(element('h3', '', kind === 'speech' ? '语音 · 听写输入' : '语音 · 语音输出'),
+      element('p', 'model-meta', state.saved ? (state.saved.enabled ? '已启用' : '未启用') + (state.saved.model ? ' · ID: '+state.saved.model : ' · 尚未设置模型 ID') : '尚未读取配置'),
+      element('p', 'hint', '独立语音设置，用于听写或朗读。'));
+    const actions = element('div', 'item-actions');
+    actions.append(action('编辑语音设置', () => editAudio(kind)));
+    item.append(actions); list.append(item);
+  }
+  for (const button of list.querySelectorAll('button')) button.disabled = editorBusy();
 }
 
 async function readModels() {
@@ -209,9 +277,14 @@ async function readModels() {
 }
 
 function newModel(focus = true) {
-  if (modelBusy) return;
+  if (editorBusy()) return;
+  if (editorType === 'voice') { switchEditor('openai'); return; }
   editing = null;
   modelForm.reset();
+  clearModelValidation();
+  byId('model-protocol').value = editorType;
+  byId('base-url').value = defaultBase(editorType);
+  textDrafts.delete(editorType);
   byId('editor-heading').textContent = '添加模型';
   byId('save-model').textContent = '保存模型';
   byId('cancel-edit').textContent = '清空草稿';
@@ -227,12 +300,16 @@ function newModel(focus = true) {
 }
 
 function editModel(model) {
-  if (modelBusy) return;
+  if (editorBusy()) return;
+  saveTextDraft();
+  editorType = model.protocol === 'anthropic' ? 'anthropic' : 'openai';
+  document.querySelector('input[name="editor_type"][value="'+editorType+'"]').checked = true;
   editing = model.id;
   modelForm.reset();
+  clearModelValidation();
   byId('editor-heading').textContent = '编辑模型';
   byId('model-label').value = model.label;
-  modelForm.querySelector(`input[name="protocol"][value="${model.protocol === 'anthropic' ? 'anthropic' : 'openai'}"]`).checked = true;
+  byId('model-protocol').value = editorType;
   byId('base-url').value = model.base_url;
   byId('model-name').value = model.model;
   byId('api-key').value = '';
@@ -252,11 +329,19 @@ function editModel(model) {
   byId('save-model').textContent = '保存更改';
   byId('cancel-edit').textContent = '取消编辑';
   announce('model-status', '密钥和提示词不会回填；留空保留服务器原值。');
+  syncEditor();
   byId('editor-heading').focus();
 }
 
+function clearModelValidation() {
+  for (const input of modelForm.querySelectorAll('input, select, textarea')) {
+    input.setCustomValidity('');
+    input.removeAttribute('aria-invalid');
+  }
+}
+
 function syncModelOptions() {
-  const openai = modelForm.querySelector('input[name="protocol"]:checked').value === 'openai';
+  const openai = byId('model-protocol').value === 'openai';
   if (!openai) byId('api-chat').checked = true;
   const responses = openai && byId('api-responses').checked;
   byId('api-mode-fields').hidden = !openai;
@@ -291,7 +376,7 @@ function syncModelOptions() {
 }
 
 async function selectModel(model) {
-  if (modelBusy) return;
+  if (editorBusy()) return;
   lockModels(true);
   try {
     const confirmed = await api(`/duet/models/${encodeURIComponent(model.id)}/select`, {method: 'POST', body: {}});
@@ -303,12 +388,18 @@ async function selectModel(model) {
 }
 
 async function deleteModel(model) {
-  if (modelBusy || !window.confirm(`删除模型「${model.label}」及其服务器配置？此操作无法撤销。`)) return;
+  if (editorBusy() || !window.confirm(`删除模型「${model.label}」及其服务器配置？此操作无法撤销。`)) return;
   lockModels(true);
   try {
     const result = await api(`/duet/models/${encodeURIComponent(model.id)}`, {method: 'DELETE'});
     if (!result?.deleted) throw new ApiError(200, 'invalid_response');
-    if (editing === model.id) { lockModels(false); newModel(false); lockModels(true); }
+    for (const [type, draft] of textDrafts) {
+      if (draft.editing === model.id) textDrafts.delete(type);
+    }
+    if (editing === model.id) {
+      editing = null;
+      if (editorType !== 'voice') { lockModels(false); newModel(false); lockModels(true); }
+    }
     await readModels();
     announce('dashboard-status', '服务器已删除该模型。');
   } catch (error) { report('dashboard-status', error); }
@@ -565,8 +656,10 @@ function audioField(kind, field) {
 
 function lockAudio(kind) {
   const state = audioSettings[kind];
-  byId(`${kind}-fields`).disabled = !state.ready || state.busy;
-  byId(`save-${kind}`).disabled = !state.ready || state.busy;
+  const active = editorType === 'voice' && document.querySelector('input[name="audio_type"]:checked').value === kind;
+  byId(kind+'-panel').hidden = !active;
+  byId(kind+'-fields').disabled = !active || !state.ready || state.busy;
+  byId(`save-${kind}`).disabled = !active || !state.ready || state.busy;
   byId(`refresh-${kind}`).disabled = state.busy;
 }
 
@@ -574,17 +667,22 @@ function audioRequired(kind) {
   for (const field of audioSettings[kind].fields) audioField(kind, field).required = audioField(kind, 'enabled').checked;
 }
 
-async function readAudio(kind) {
+async function readAudio(kind, force = false) {
   const state = audioSettings[kind];
   const request = ++state.read;
+  const revision = state.revision || 0;
   const data = await api(state.path);
   if (!data || typeof data.enabled !== 'boolean' || typeof data.api_key_set !== 'boolean' ||
       state.fields.some((field) => typeof data[field] !== 'string') ||
       !state.options.includes(data[state.choice]) ||
       (kind === 'tts' && typeof data.ready !== 'boolean')) throw new ApiError(200, 'invalid_response');
   if (request !== state.read) return;
+  state.saved = data;
+  renderModels();
+  if ((state.dirty && !force) || revision !== (state.revision || 0)) return;
+  state.dirty = false;
   audioField(kind, 'enabled').checked = data.enabled;
-  for (const field of state.fields) audioField(kind, field).value = data[field];
+  for (const field of state.fields) audioField(kind, field).value = data[field] || (field === 'base_url' ? defaultBase('openai') : '');
   byId(`${kind}-form`).elements.namedItem(state.choice).value = data[state.choice];
   audioField(kind, 'key').value = '';
   audioField(kind, 'key').disabled = false;
@@ -602,7 +700,7 @@ for (const [kind, state] of Object.entries(audioSettings)) {
   const form = byId(`${kind}-form`);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (!state.ready || state.busy) return;
+    if (!state.ready || editorBusy() || editorType !== 'voice' || byId(kind+'-panel').hidden) return;
     const urlInput = audioField(kind, 'base_url');
     urlInput.setCustomValidity('');
     if (urlInput.value.trim()) {
@@ -621,20 +719,21 @@ for (const [kind, state] of Object.entries(audioSettings)) {
     else if (audioField(kind, 'key').value.trim()) body.api_key = audioField(kind, 'key').value.trim();
     state.busy = true;
     const epoch = authEpoch;
-    lockAudio(kind);
+    syncEditor();
     announce(`${kind}-status`, `正在保存${state.label}设置…`);
     let confirmed = false;
     try {
       await api(state.path, {method: 'PUT', body});
       confirmed = true;
       audioField(kind, 'key').value = '';
-      await readAudio(kind);
+      await readAudio(kind, true);
     } catch (error) {
       if (authEpoch === epoch && session) announce(`${kind}-status`, confirmed ? '服务器已确认保存，但状态未能重新读取；请刷新核对。' : friendly(error), true);
     } finally {
-      if (authEpoch === epoch) { state.busy = false; lockAudio(kind); }
+      if (authEpoch === epoch) { state.busy = false; syncEditor(); }
     }
   });
+  for (const eventName of ['input', 'change']) form.addEventListener(eventName, () => { state.dirty = true; state.revision = (state.revision || 0) + 1; });
   for (const field of state.fields) {
     const input = audioField(kind, field);
     input.setAttribute('aria-invalid', 'false');
@@ -648,13 +747,13 @@ for (const [kind, state] of Object.entries(audioSettings)) {
     if (key.disabled) key.value = '';
   });
   byId(`refresh-${kind}`).addEventListener('click', async () => {
-    if (state.busy) return;
+    if (editorBusy()) return;
     state.busy = true;
     const epoch = authEpoch;
-    lockAudio(kind);
-    try { await readAudio(kind); }
+    syncEditor();
+    try { await readAudio(kind, true); }
     catch (error) { report(`${kind}-status`, error); }
-    finally { if (authEpoch === epoch) { state.busy = false; lockAudio(kind); } }
+    finally { if (authEpoch === epoch) { state.busy = false; syncEditor(); } }
   });
 }
 
@@ -711,7 +810,7 @@ byId('logout').addEventListener('click', async () => {
 
 modelForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (modelBusy) return;
+  if (editorBusy() || editorType === 'voice') return;
   const urlInput = byId('base-url');
   urlInput.setCustomValidity('');
   try {
@@ -721,7 +820,7 @@ modelForm.addEventListener('submit', async (event) => {
   for (const id of ['model-label', 'model-name']) byId(id).setCustomValidity(byId(id).value.trim() ? '' : '请填写此项。');
   if (!modelForm.reportValidity()) return;
   const previous = editing;
-  const body = {label: byId('model-label').value.trim(), protocol: modelForm.querySelector('input[name="protocol"]:checked').value,
+  const body = {label: byId('model-label').value.trim(), protocol: byId('model-protocol').value,
     base_url: urlInput.value.trim(), model: byId('model-name').value.trim(),
     prompt_cache_enabled: byId('prompt-cache-enabled').checked, stream_usage_enabled: byId('stream-usage-enabled').checked};
   body.api_mode = body.protocol === 'openai' && byId('api-responses').checked ? 'responses' : 'chat_completions';
@@ -755,11 +854,19 @@ modelForm.addEventListener('submit', async (event) => {
   } finally { lockModels(false); }
 });
 
-for (const id of ['base-url', 'model-label', 'model-name']) byId(id).addEventListener('input', () => byId(id).setCustomValidity(''));
+for (const id of ['base-url', 'model-label', 'model-name']) { const input = byId(id); input.addEventListener('invalid', () => input.setAttribute('aria-invalid', 'true')); input.addEventListener('input', () => { input.setCustomValidity(''); input.removeAttribute('aria-invalid'); }); }
 byId('clear-key').addEventListener('change', () => { byId('api-key').disabled = byId('clear-key').checked; if (byId('clear-key').checked) byId('api-key').value = ''; });
 byId('clear-prompt').addEventListener('change', () => { byId('system-prompt').disabled = byId('clear-prompt').checked; if (byId('clear-prompt').checked) byId('system-prompt').value = ''; });
-byId('new-model').addEventListener('click', () => newModel());
-for (const input of modelForm.querySelectorAll('input[name="protocol"], input[name="api_mode"]')) input.addEventListener('change', syncModelOptions);
+byId('new-model').addEventListener('click', () => {
+  if (editorBusy()) return;
+  if (editorType === 'voice') switchEditor('openai');
+  // Add starts a new profile in every category; keep only unsaved creation drafts.
+  for (const [type, draft] of textDrafts) {
+    if (draft.editing !== null) textDrafts.delete(type);
+  }
+  newModel();
+});
+for (const input of modelForm.querySelectorAll('input[name="api_mode"]')) input.addEventListener('change', syncModelOptions);
 byId('model-name').addEventListener('input', syncModelOptions);
 byId('prompt-cache-enabled').addEventListener('change', syncModelOptions);
 byId('cancel-edit').addEventListener('click', () => newModel());
@@ -784,3 +891,7 @@ byId('refresh-usage').addEventListener('click', async () => {
 });
 
 window.addEventListener('pagehide', () => { signedOut(); });
+
+for (const input of document.querySelectorAll('input[name="editor_type"]')) input.addEventListener('change', () => switchEditor(input.value));
+for (const input of document.querySelectorAll('input[name="audio_type"]')) input.addEventListener('change', syncEditor);
+syncEditor();

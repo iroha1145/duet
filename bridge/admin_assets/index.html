@@ -50,26 +50,36 @@
 
       <div class="model-layout">
         <section class="card models-panel" aria-labelledby="models-heading">
-          <div class="section-heading"><div><h2 id="models-heading">模型目录</h2><p class="hint">切换只影响之后发送的消息，正在运行的任务继续使用原配置。</p></div><button id="new-model" class="quiet" type="button">添加模型</button></div>
+          <div class="section-heading"><div><h2 id="models-heading">模型目录</h2><p class="hint">文本模型可选用于对话；语音配置单独启用。切换文本模型只影响之后发送的消息。</p></div><button id="new-model" class="quiet" type="button">添加模型</button></div>
           <div id="models-list" class="models-list"></div>
-          <p id="models-empty" class="empty" hidden>还没有模型。添加一个模型后，所有设备即可使用。</p>
+          <p id="models-empty" class="empty" hidden>还没有文本模型。添加后可选用于所有设备的对话。</p>
         </section>
 
         <section class="card editor-panel" aria-labelledby="editor-heading">
           <h2 id="editor-heading" tabindex="-1">添加模型</h2>
+          <fieldset id="editor-types" class="protocol-choice editor-types"><legend>模型类型</legend>
+            <label><input type="radio" name="editor_type" value="openai" checked> OpenAI 文本</label>
+            <label><input type="radio" name="editor_type" value="anthropic"> Claude 文本</label>
+            <label><input type="radio" name="editor_type" value="voice"> 语音</label>
+          </fieldset>
+          <fieldset id="audio-types" class="protocol-choice" hidden disabled><legend>语音用途</legend>
+            <label><input type="radio" name="audio_type" value="speech" checked> 听写输入</label>
+            <label><input type="radio" name="audio_type" value="tts"> 语音输出</label>
+          </fieldset>
+          <p id="editor-type-help" class="hint">文本模型用于对话；语音分别保存听写与朗读配置。切换类型不会保存。</p>
           <form id="model-form" action="/duet/models" method="post" aria-labelledby="editor-heading">
             <fieldset id="model-fields">
               <legend class="visually-hidden">模型连接配置</legend>
               <div class="field"><label for="model-label">显示名称 <span class="required">必填</span></label><input id="model-label" name="label" autocomplete="off" maxlength="200" required></div>
-              <fieldset class="protocol-choice"><legend>兼容协议</legend><label><input type="radio" name="protocol" value="openai" checked> OpenAI 兼容</label><label><input type="radio" name="protocol" value="anthropic"> Anthropic 兼容</label></fieldset>
+              <input id="model-protocol" name="protocol" type="hidden" value="openai">
               <fieldset id="api-mode-fields" class="protocol-choice" aria-describedby="api-mode-help">
                 <legend>OpenAI API</legend>
                 <label for="api-chat"><input id="api-chat" type="radio" name="api_mode" value="chat_completions" checked> Chat Completions</label>
                 <label for="api-responses"><input id="api-responses" type="radio" name="api_mode" value="responses"> Responses</label>
               </fieldset>
               <p id="api-mode-help" class="hint">现有配置默认使用 Chat Completions；GPT-6 Luna 需要推理与工具调用时请选择 Responses。切换后仍需保存。</p>
-              <div class="field"><label for="base-url">API 地址 <span class="required">必填</span></label><input id="base-url" name="base_url" type="url" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="https://gateway.example/v1" maxlength="4096" aria-describedby="base-help" required><p id="base-help" class="hint">填写兼容 API 的基础地址，不含密钥、查询参数或片段。</p></div>
-              <div class="field"><label for="model-name">模型名称 <span class="required">必填</span></label><input id="model-name" name="model" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="512" required></div>
+              <div class="field"><label for="base-url">API 地址 <span class="required">必填</span></label><input id="base-url" name="base_url" type="url" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" value="https://api.openai.com/v1" maxlength="4096" aria-describedby="base-help" required><p id="base-help" class="hint">已预填官方基础地址，可改为兼容网关；不含密钥、查询参数或片段。</p></div>
+              <div class="field"><label for="model-name">模型 ID <span class="required">必填</span></label><input id="model-name" name="model" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="512" required></div>
               <div id="reasoning-field" class="field">
                 <label for="reasoning-effort">推理强度</label>
                 <select id="reasoning-effort" name="reasoning_effort" aria-describedby="reasoning-help">
@@ -101,18 +111,7 @@
             <p id="model-status" class="status" role="status" aria-live="polite"></p>
             <div class="form-actions"><button id="save-model" class="primary" type="submit">保存模型</button><button id="cancel-edit" class="quiet" type="button">清空草稿</button></div>
           </form>
-        </section>
-      </div>
-
-      <section class="card usage-panel" aria-labelledby="usage-heading">
-        <div class="section-heading"><div><h2 id="usage-heading">实际请求与缓存用量</h2><p class="hint">最近 50 次本版本记录的模型调用，包含工具续轮。数值来自提供方；缓存提示不能保证命中，清除对话也会删除其记录。</p></div><button id="refresh-usage" class="quiet" type="button">刷新用量</button></div>
-        <p id="usage-status" class="status" role="status" aria-live="polite"></p>
-        <p id="usage-summary" class="hint"></p>
-        <ol id="usage-list" class="usage-list"></ol>
-        <p id="usage-empty" class="empty" hidden>尚无模型调用记录。发送消息后刷新此处，核对提供方实际报告的用量。</p>
-      </section>
-
-      <section class="card speech-panel" aria-labelledby="speech-heading">
+      <section id="speech-panel" class="audio-editor" aria-labelledby="speech-heading" hidden>
         <div class="section-heading"><div><h2 id="speech-heading">语音输入</h2><p class="hint">将录音交给独立的 OpenAI 兼容转写服务，可以使用与对话不同的提供商。</p></div><button id="refresh-speech" class="quiet" type="button">刷新语音设置</button></div>
         <form id="speech-form" action="/duet/speech/config" method="post" aria-labelledby="speech-heading">
           <fieldset id="speech-fields" disabled>
@@ -125,8 +124,8 @@
             </fieldset>
             <p id="speech-format-help" class="hint">使用 gpt-transcribe 时选择 OpenAI 格式；其他服务按其支持的转写格式选择。</p>
             <div class="speech-columns">
-              <div class="field"><label for="speech-base-url">转写 API 地址</label><input id="speech-base-url" name="base_url" type="url" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="https://gateway.example/v1" maxlength="4096"></div>
-              <div class="field"><label for="speech-model">转写模型</label><input id="speech-model" name="model" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="512"></div>
+              <div class="field"><label for="speech-base-url">转写 API 地址</label><input id="speech-base-url" name="base_url" type="url" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" value="https://api.openai.com/v1" maxlength="4096"></div>
+              <div class="field"><label for="speech-model">转写模型 ID</label><input id="speech-model" name="model" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="512"></div>
             </div>
             <div class="field"><label for="speech-key">转写 API 密钥</label><input id="speech-key" name="api_key" type="password" autocomplete="off" maxlength="65536" aria-describedby="speech-key-help"><p id="speech-key-help" class="hint">密钥不会回填；留空保留已有密钥。</p><label class="check-row"><input id="speech-clear-key" name="clear_key" type="checkbox" disabled> 清空服务器已保存的转写密钥</label></div>
           </fieldset>
@@ -135,7 +134,7 @@
         </form>
       </section>
 
-      <section class="card speech-panel" aria-labelledby="tts-heading">
+      <section id="tts-panel" class="audio-editor" aria-labelledby="tts-heading" hidden>
         <div class="section-heading"><div><h2 id="tts-heading">朗读回复</h2><p class="hint">为手机的朗读功能选择独立语音服务。模型、声音和密钥由服务器保存。</p></div><button id="refresh-tts" class="quiet" type="button">刷新朗读设置</button></div>
         <form id="tts-form" action="/duet/tts/config" method="post" aria-labelledby="tts-heading">
           <fieldset id="tts-fields" disabled>
@@ -146,11 +145,11 @@
               <label><input id="tts-transport-http" type="radio" name="transport" value="speech_http" checked aria-describedby="tts-transport-help"> HTTP 语音合成</label>
               <label><input id="tts-transport-realtime" type="radio" name="transport" value="realtime_ws" aria-describedby="tts-transport-help"> OpenAI Realtime</label>
             </fieldset>
-            <p id="tts-transport-help" class="hint">Realtime 语音模型使用 OpenAI Realtime；支持 /audio/speech 的服务选择 HTTP 语音合成。API 地址仍填写 http/https 地址。</p>
-            <p id="tts-required-help" class="hint">启用时，API 地址、模型和声音均为必填。服务需支持所选接口及 24 kHz 单声道 PCM 输出。</p>
+            <p id="tts-transport-help" class="hint">Realtime 语音模型使用 OpenAI Realtime；支持 /audio/speech 的服务选择 HTTP 语音合成。API 地址仍填写 http/https 地址。GPT-Live 使用独立接口，当前尚未支持。</p>
+            <p id="tts-required-help" class="hint">启用时，API 地址、模型 ID 和声音均为必填。服务需支持所选接口及 24 kHz 单声道 PCM 输出。</p>
             <div class="speech-columns">
-              <div class="field"><label for="tts-base-url">朗读 API 地址</label><input id="tts-base-url" name="base_url" type="url" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="https://gateway.example/v1" maxlength="4096" aria-describedby="tts-required-help" aria-invalid="false"></div>
-              <div class="field"><label for="tts-model">朗读模型</label><input id="tts-model" name="model" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="512" aria-describedby="tts-required-help" aria-invalid="false"></div>
+              <div class="field"><label for="tts-base-url">朗读 API 地址</label><input id="tts-base-url" name="base_url" type="url" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" value="https://api.openai.com/v1" maxlength="4096" aria-describedby="tts-required-help" aria-invalid="false"></div>
+              <div class="field"><label for="tts-model">朗读模型 ID</label><input id="tts-model" name="model" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="512" aria-describedby="tts-required-help" aria-invalid="false"></div>
               <div class="field"><label for="tts-voice">声音</label><input id="tts-voice" name="voice" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="200" aria-describedby="tts-required-help" aria-invalid="false"></div>
             </div>
             <div class="field"><label for="tts-key">朗读 API 密钥</label><input id="tts-key" name="api_key" type="password" autocomplete="new-password" maxlength="65536" aria-describedby="tts-key-help"><p id="tts-key-help" class="hint">密钥不会回填；留空保留已有密钥。</p><label class="check-row"><input id="tts-clear-key" name="clear_key" type="checkbox" disabled> 清空服务器已保存的朗读密钥</label></div>
@@ -158,6 +157,17 @@
           <p id="tts-status" class="status" role="status" aria-live="polite">登录后读取服务器朗读设置。</p>
           <button id="save-tts" class="primary" type="submit" disabled>保存朗读设置</button>
         </form>
+      </section>
+
+        </section>
+      </div>
+
+      <section class="card usage-panel" aria-labelledby="usage-heading">
+        <div class="section-heading"><div><h2 id="usage-heading">实际请求与缓存用量</h2><p class="hint">最近 50 次本版本记录的模型调用，包含工具续轮。数值来自提供方；缓存提示不能保证命中，清除对话也会删除其记录。</p></div><button id="refresh-usage" class="quiet" type="button">刷新用量</button></div>
+        <p id="usage-status" class="status" role="status" aria-live="polite"></p>
+        <p id="usage-summary" class="hint"></p>
+        <ol id="usage-list" class="usage-list"></ol>
+        <p id="usage-empty" class="empty" hidden>尚无模型调用记录。发送消息后刷新此处，核对提供方实际报告的用量。</p>
       </section>
 
       <section class="card connectors-panel" aria-labelledby="connectors-heading">
