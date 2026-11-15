@@ -130,7 +130,7 @@ class OtherSessions:
             return None
         return channel, kind, root
 
-    def _task(self, session, cid, root):
+    def _task(self, session, cid):
         tid = session.get("task_id") or session.get("discussion_task_id") or session.get("trigger_id")
         if not tid or self.tasks is None:
             return None
@@ -140,14 +140,12 @@ class OtherSessions:
             if error.status == 404:
                 return None
             raise
-        # The canonical task projection also covers schedules created before
-        # task overrides existed. Do not require an optional override record.
-        # An older run/discussion must not open a newer task conversation.
-        if row.get("thread_own_session_id") != session["id"] or row["data"].get("threadRootId") != root:
-            return None
-        return {"channel_id": cid, "task_id": tid, "thread_id": root}
+        # The canonical projection, rather than an optional discussion record,
+        # establishes that the task still exists in this channel. A schedule
+        # can be deleted directly while leaving its discussion history intact.
+        return row
 
-    def entry(self, session, source, context):
+    def entry(self, session, source, context, task_row):
         channel, kind, root = context
         pending = self.cards.pending(session)
         waiting = bool(pending) and session.get("phase") == "running"
@@ -168,10 +166,15 @@ class OtherSessions:
                "duet_context": {"kind": kind, "channel_id": session["channel_id"], "thread_root_id": root}}
         if session.get("phase") in {"idle", "error", "interrupted"}:
             row["stage"] = "cut_off" if session["phase"] == "interrupted" else "ended" if state == "failed" else "at_rest"
-        task = self._task(session, session["channel_id"], root)
-        if task is not None:
+        # Keep historical runs distinct from the task's current conversation.
+        # They remain history, but must never navigate to a different root.
+        if (task_row is not None and task_row.get("thread_own_session_id") == session["id"]
+                and task_row["data"].get("threadRootId") == root):
+            task = {"channel_id": session["channel_id"], "task_id": task_row["id"], "thread_id": root}
             row["task"] = task
             row["duet_context"]["task_id"] = task["task_id"]
+            title = task_row["data"]["title"]
+            row["title"] = "Discuss: " + title if kind == "task_discussion" else title
         # s8q.I retains page verbatim as zvb.u. The narrow native adapter uses
         # this context plus the parsed yvb task to enter existing Tasks UI.
         row["page"].update(product="duet", why_not="open_in_channel_tasks",
@@ -209,7 +212,12 @@ class OtherSessions:
                 continue
             if not body.get("include_ended") and (session.get("ended_at") or source.get("status") == "archived"):
                 continue
-            row = self.entry(session, source, context)
+            task_row = self._task(session, session["channel_id"])
+            if self.tasks is not None and task_row is None:
+                # Removed/retired/moved tasks are not actionable other work.
+                # Preserve their actual sessions and messages as history.
+                continue
+            row = self.entry(session, source, context, task_row)
             total_waiting += row["state"] == "needs_you"
             key = (session["created_at"], sid)
             if after is None or key < after:
