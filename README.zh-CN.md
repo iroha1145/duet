@@ -8,7 +8,7 @@
 
 如自行给 systemd 服务增加 `RestrictAddressFamilies`，语音转换的 ZeroMQ 依赖可能还需要 `AF_NETLINK` 来枚举网络接口。已知部署限制：仅允许 `AF_INET AF_INET6 AF_UNIX` 时，ffmpeg 在接口解析阶段退出；保留其余限制并加入 `AF_NETLINK` 后，同样的 PCM/Opus 转换通过。随包安装器不设置这项限制；自定义服务应在实际运行用户和沙箱配置下验证转换，而不只在 SSH 终端检查 ffmpeg。
 
-此 GitHub 仓库已公开，仅提供服务端源码、安装器和管理脚本，不包含或提供 APK、手机源码、用户数据、账号或 provider key。准备 Git 后，用普通服务用户通过 HTTPS 拉取，无需 GitHub 登录或 token：
+此 GitHub 仓库已公开，仅提供服务端源码、安装器和管理脚本，不包含或提供 APK、手机源码、用户数据、账号或 provider key。准备 Git 后，可由 root 或普通服务用户通过 HTTPS 拉取，无需 GitHub 登录或 token：
 
 ```bash
 git clone https://github.com/iroha1145/duet.git "$HOME/duet-source"
@@ -27,7 +27,7 @@ bash installer/install-server.sh --public-url https://duet.example.com --usernam
 bash installer/install-server.sh --public-url https://duet.example.com --username owner
 ```
 
-首次安装会在终端通过 getpass 两次读取密码（至少 12 字符），不把密码写入参数、脚本、日志或环境变量。已有账号不会重新初始化，`--username` 也不会更名或重置密码。默认安装到 `$HOME/.local/share/duet`，可用 `--root /absolute/path` 指定由当前用户持有的专用空目录；目前路径仅接受无空格的 ASCII 绝对路径，不接受符号链接祖先。已有安装必须显式传 `--upgrade`。
+首次安装会在终端通过 getpass 两次读取密码（至少 12 字符），不把密码写入参数、脚本、日志或环境变量。已有账号不会重新初始化，`--username` 也不会更名或重置密码。普通用户默认安装到 `$HOME/.local/share/duet`，可用 `--root /absolute/path` 指定由当前用户持有的专用空目录；目前路径仅接受无空格的 ASCII 绝对路径，不接受符号链接祖先。已有安装必须显式传 `--upgrade`。
 
 安装器复制代码到独立 `releases/release-*` 目录，创建该版本自己的 venv，使用共享的 `data/`，生成并启动 `duet-server.service` 用户服务。`current` 是记录版本路径的普通文本文件。失败时保留已暂存版本便于检查，不删除旧版本或数据。`--check` 只做参数、源文件、账号和路径预检，不联网、不写文件、不启动服务。
 
@@ -204,3 +204,13 @@ cd /absolute/install/releases/release-XXXXXXXX
 图片附件支持 PNG/JPEG/GIF/WebP（单张最多 6 MiB），PDF、DOCX、XLSX、PPTX 和 UTF-8 文本原始文件最多 20 MiB；每条消息最多 10 个附件、总计最多 20 MiB。文档文本有明确提取上限，超限不会静默截断，提取本身不执行公式或宏，也没有 OCR 或文档视觉布局理解。下载保留原始字节，详见 `docs/attachments.md`。Make 使用真实 HTML/Office 文件和保留的原生预览组件，历史产物按内容版本保存；没有公开分享 URL。
 
 模型能用哪些工具、电脑操作环境是否就绪、语音是否可用取决于服务器配置与系统依赖。服务器可在工具审批后执行工作区文件和命令；单账号方案不是多租户隔离平台。协议测试使用明确标注的本地样例；真实提供商、实际缓存命中、手机后台通知及语音效果必须单独记录验证结果，不能从协议样例推定。
+
+## Root 登录部署
+
+root 可直接在可信 checkout 运行 `bash duet.sh`，默认安装到 `/opt/duet`，创建专用非 root 系统账号 `duet-server`，使用系统级 unit（`systemctl status duet-server.service`），无需 root 用户会话或 linger。root 只负责复制文件、维护 unit 与安装归属；pip、venv、账号初始化及服务进程均降权，服务和前台命令均禁止获取新权限。源 checkout 可以在 `/root`，无需修改 `/root` 权限。菜单可指定其它专用系统账号；已有外部账号、unit 或安装目录不能被接管。多实例必须分别指定目录、账号、unit 和端口。
+
+直接安装器同样支持 root：先运行 `bash installer/install-server.sh --public-url https://duet.example.com --username owner --check`，验证后去掉 `--check` 安装。预检不创建账号、文件或服务。系统安装目录及其祖先须为 root 持有、无符号链接且其他用户不可写。已有安装升级仍需 `--upgrade`；管理器升级会先停服务、私有备份 data，再安装当前 checkout，保留账号与模型配置。新管理配置记录 `scope=system` 和 `service_user`，不保存秘密；旧配置仍按 user scope 兼容，应以原用户管理。
+
+root 的 `--no-systemd` 输出含 `runuser` 和 `setpriv --no-new-privs` 的完整降权启动命令；按该命令启动并保持终端开启。前台模式的停止、状态与升级仍按前文手工停服备份流程操作。
+
+已有账号的预检会在持有 SQLite 默认 Linux Unix VFS 字节锁时读取数据库与已提交 WAL，在自动清理的私有临时目录检查快照；不会让 SQLite 打开原库或新建原库 WAL/SHM。写入竞争、恢复需求、坏库或单文件超过 128 MiB 时明确失败，待处理后重试，不忽略 WAL 或重新初始化已有账号。

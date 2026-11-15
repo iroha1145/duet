@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run from an authenticated private checkout. Never enable shell tracing here.
+# Run from a trusted checkout as root or the original installation user.
+# Root installs use a dedicated low privilege service account. Never enable tracing.
 set -euo pipefail
 umask 077
 command -v python3 >/dev/null || { printf '需要 Python 3.11+\n' >&2; exit 2; }

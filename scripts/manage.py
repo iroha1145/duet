@@ -15,6 +15,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 
+SYSTEM_UNITS = Path("/etc/systemd/system")
+
 SOURCE = Path(__file__).resolve().parent.parent
 
 
@@ -153,6 +155,16 @@ def validate(settings):
         raise OperatorError("端口须为 1024..65535")
     if type(settings["no_systemd"]) is not bool or type(settings["desktop"]) is not bool:
         raise OperatorError("安装选项无效")
+    scope = settings.get("scope", "user")
+    if scope not in ("user", "system"):
+        raise OperatorError("服务 scope 无效")
+    if scope == "system":
+        if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,30}", settings.get("service_user", "")) or settings["service_user"] == "root":
+            raise OperatorError("专用服务账号无效")
+        if not hasattr(os, "geteuid") or os.geteuid() != 0:
+            raise OperatorError("系统安装管理请使用 root")
+    elif settings.get("service_user"):
+        raise OperatorError("用户安装不能指定系统账号")
     # Match install-server.sh's os.path.abspath, without resolving symlinks.
     # Normalize legacy saved values too, so unit ownership remains exact.
     return {**settings, "root": os.path.abspath(settings["root"])}
@@ -178,6 +190,10 @@ def installer_args(settings, upgrade=False):
     args = ["bash", str(SOURCE / "installer/install-server.sh"), "--root", settings["root"],
             "--source", str(SOURCE), "--public-url", settings["public_url"],
             "--port", str(settings["port"]), "--service", settings["service"]]
+    if settings.get("scope") == "system":
+        args.extend(["--service-user", settings["service_user"]])
+    elif hasattr(os, "geteuid") and os.geteuid() == 0:
+        raise OperatorError("此配置属于普通用户；请以原安装用户登录管理")
     for field, flag in (("no_systemd", "--no-systemd"), ("desktop", "--desktop")):
         if settings[field]:
             args.append(flag)
@@ -190,19 +206,44 @@ def service(settings, action):
     settings = validate(settings)
     if settings["no_systemd"]:
         raise OperatorError("此安装为前台模式：使用安装器打印的命令启动，以 Ctrl-C 停止；无 systemd 状态管理")
+    system = settings.get("scope", "user") == "system"
     unit = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user" / (settings["service"] + ".service")
+    if system:
+        unit = SYSTEM_UNITS / (settings["service"] + ".service")
     marker = "# duet-install-root: " + settings["root"]
     if unit.is_symlink() or not unit.is_file() or marker not in unit.read_text().splitlines():
-        raise OperatorError("未找到属于此安装的用户服务")
-    subprocess.run(["systemctl", "--user", action, settings["service"] + ".service"], check=True)
+        raise OperatorError("未找到属于此安装的服务")
+    if system:
+        root = Path(settings["root"])
+        owner = root / ".duet-install"
+        expected = "duet system installation\nservice-user: " + settings["service_user"] + "\n"
+        if owner.is_symlink() or not owner.is_file() or owner.stat().st_uid != 0 or owner.stat().st_mode & 0o022 or owner.read_text() != expected:
+            raise OperatorError("系统安装归属不匹配")
+        if unit.stat().st_uid != 0 or "User=" + settings["service_user"] not in unit.read_text().splitlines():
+            raise OperatorError("系统服务账号或归属不匹配")
+        import pwd
+        if pwd.getpwnam(settings["service_user"]).pw_uid == 0:
+            raise OperatorError("拒绝 root 服务账号")
+        effective = subprocess.check_output(["systemctl", "show", settings["service"] + ".service",
+            "--property=User,Group,NoNewPrivileges,FragmentPath,DropInPaths"], text=True)
+        properties = dict(line.split("=", 1) for line in effective.splitlines() if "=" in line)
+        expected = {"User": settings["service_user"], "Group": settings["service_user"],
+                    "NoNewPrivileges": "yes", "FragmentPath": str(unit), "DropInPaths": ""}
+        if any(properties.get(key) != value for key, value in expected.items()):
+            raise OperatorError("系统服务的实际账号或覆盖配置不安全")
+    subprocess.run(["systemctl", *([] if system else ["--user"]), action, settings["service"] + ".service"], check=True)
 
 
 def install(path, previous):
-    defaults = previous or {"root": str(Path.home() / ".local/share/duet"), "public_url": "https://duet.example.com", "port": 48766, "service": "duet-server", "desktop": False, "no_systemd": False}
+    system = hasattr(os, "geteuid") and os.geteuid() == 0
+    defaults = previous or {"root": "/opt/duet" if system else str(Path.home() / ".local/share/duet"), "public_url": "https://duet.example.com", "port": 48766, "service": "duet-server", "desktop": False, "no_systemd": False}
     settings = validate({"root": ask("安装目录", defaults["root"]), "public_url": ask("公网 HTTPS origin", defaults["public_url"]),
-        "port": int(ask("本地端口", str(defaults["port"]))), "service": ask("用户服务名称", defaults["service"]),
+        "port": int(ask("本地端口", str(defaults["port"]))), "service": ask("服务名称", defaults["service"]),
         "no_systemd": ask("无 systemd，仅准备文件？y/n", "y" if defaults["no_systemd"] else "n") == "y",
         "desktop": ask("安装可选桌面 unit（须已有系统依赖）？y/n", "y" if defaults["desktop"] else "n") == "y"})
+    scope = defaults.get("scope", "system" if system and previous is None else "user")
+    if scope == "system":
+        settings = validate({**settings, "scope": scope, "service_user": ask("专用低权限系统账号", defaults.get("service_user", "duet-server"))})
     args = installer_args(settings)
     username = ask("首次账号名（已有账号直接回车）")
     if username:

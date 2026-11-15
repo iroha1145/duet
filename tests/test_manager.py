@@ -151,10 +151,82 @@ class SettingsTests(unittest.TestCase):
                     with tarfile.open(backups[0]) as archive:
                         self.assertEqual(archive.extractfile("data/tasks.json").read(), b'{"fixture_task":"retained"}')
                     events.append("upgrade")
-            with patch.object(manager.subprocess, "run", side_effect=command), patch.object(manager, "service", side_effect=lambda *args: events.append("stop")), patch.object(manager, "ask", return_value="UPDATE"):
+            with patch.object(manager.os, "geteuid", return_value=1000, create=True), patch.object(manager.subprocess, "run", side_effect=command), patch.object(manager, "service", side_effect=lambda *args: events.append("stop")), patch.object(manager, "ask", return_value="UPDATE"):
                 manager.update(settings)
             self.assertEqual(events, ["check", "stop", "upgrade"])
             self.assertEqual((root / "data/tasks.json").read_text(), '{"fixture_task":"retained"}')
+
+    def test_system_update_preserves_data_and_uses_dedicated_account(self):
+        import tarfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data").mkdir()
+            (root / "data/tasks.json").write_text('{"fixture_task":"retained"}')
+            settings = {"scope": "system", "service_user": "duet-fixture", "root": str(root), "port": 48766, "service": "fixture", "public_url": "https://duet.example.com", "no_systemd": False, "desktop": False}
+            events = []
+            def command(args, **kwargs):
+                self.assertEqual(args[args.index("--service-user") + 1], "duet-fixture")
+                self.assertIn("--upgrade", args)
+                if "--check" in args:
+                    events.append("check")
+                else:
+                    backups = list(root.glob("backup-data-*.tar.gz"))
+                    self.assertEqual(len(backups), 1)
+                    with tarfile.open(backups[0]) as archive:
+                        self.assertEqual(archive.extractfile("data/tasks.json").read(), b'{"fixture_task":"retained"}')
+                    events.append("upgrade")
+            with patch.object(manager.os, "geteuid", return_value=0, create=True), patch.object(manager.subprocess, "run", side_effect=command), patch.object(manager, "service", side_effect=lambda *args: events.append("stop")), patch.object(manager, "ask", return_value="UPDATE"):
+                manager.update(settings)
+            self.assertEqual(events, ["check", "stop", "upgrade"])
+            self.assertEqual((root / "data/tasks.json").read_text(), '{"fixture_task":"retained"}')
+
+    def test_scope_validation_and_upgrade_arguments(self):
+        base = {"root": "/opt/duet", "port": 48766, "service": "fixture", "public_url": "https://duet.example.com", "no_systemd": False, "desktop": False}
+        with patch.object(manager.os, "geteuid", return_value=0, create=True):
+            system = {**base, "scope": "system", "service_user": "duet-fixture"}
+            args = manager.installer_args(system, upgrade=True)
+            self.assertIn("--upgrade", args)
+            self.assertEqual(args[args.index("--service-user") + 1], "duet-fixture")
+            for invalid in ({**system, "service_user": "root"}, {**system, "scope": "foreign"}, {**base, "service_user": "duet-fixture"}):
+                with self.assertRaises(manager.OperatorError):
+                    manager.validate(invalid)
+            with self.assertRaises(manager.OperatorError):
+                manager.installer_args(base)
+        with patch.object(manager.os, "geteuid", return_value=1000, create=True):
+            self.assertNotIn("--service-user", manager.installer_args(base))
+            with self.assertRaises(manager.OperatorError):
+                manager.validate(system)
+
+    @unittest.skipUnless(__import__("sys").platform == "linux" and __import__("os").geteuid() == 0, "Linux root system unit ownership")
+    def test_system_service_scope_and_foreign_unit_rejection(self):
+        import os
+        import pwd
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "install"
+            root.mkdir()
+            units = Path(directory) / "units"
+            units.mkdir()
+            owner = root / ".duet-install"
+            owner.write_text("duet system installation\nservice-user: duet-fixture\n")
+            unit = units / "fixture.service"
+            unit.write_text(f"# duet-install-root: {root}\nUser=duet-fixture\n")
+            settings = {"root": str(root), "port": 48766, "service": "fixture", "public_url": "https://duet.example.com", "no_systemd": False, "desktop": False, "scope": "system", "service_user": "duet-fixture"}
+            with patch.object(manager, "SYSTEM_UNITS", units), patch.object(pwd, "getpwnam") as account, patch.object(manager.subprocess, "run") as run, patch.object(manager.subprocess, "check_output", return_value=f"User=duet-fixture\nGroup=duet-fixture\nNoNewPrivileges=yes\nFragmentPath={unit}\nDropInPaths=\n") as show:
+                account.return_value.pw_uid = 999
+                manager.service(settings, "status")
+                run.assert_called_once_with(["systemctl", "status", "fixture.service"], check=True)
+                unit.write_text(f"# duet-install-root: {root}-foreign\nUser=duet-fixture\n")
+                with self.assertRaises(manager.OperatorError):
+                    manager.service(settings, "start")
+                unit.write_text(f"# duet-install-root: {root}\nUser=root\n")
+                with self.assertRaises(manager.OperatorError):
+                    manager.service(settings, "start")
+                self.assertEqual(run.call_count, 1)
+                unit.write_text(f"# duet-install-root: {root}\nUser=duet-fixture\n")
+                show.return_value = f"User=root\nGroup=root\nNoNewPrivileges=no\nFragmentPath={unit}\nDropInPaths=/etc/override.conf\n"
+                with self.assertRaises(manager.OperatorError):
+                    manager.service(settings, "start")
+                self.assertEqual(run.call_count, 1)
 
     def test_secret_rejects_getpass_plaintext_fallback(self):
         with patch.object(manager.getpass, "getpass", side_effect=manager.getpass.GetPassWarning("fixture unsupported terminal")):

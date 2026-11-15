@@ -4,7 +4,7 @@
 
 ## 一键入口
 
-准备 Linux、Git、Python 3.11+、venv/pip 和普通服务用户。此仓库已公开，使用 HTTPS 拉取无需 GitHub 账号、登录或 token：
+准备 Linux、Git、Python 3.11+、venv/pip；可直接 root 登录，或使用普通服务用户。此仓库已公开，使用 HTTPS 拉取无需 GitHub 账号、登录或 token：
 
 ```bash
 git clone https://github.com/iroha1145/duet.git "$HOME/duet-source"
@@ -14,7 +14,7 @@ bash duet.sh
 
 先拉取完整仓库、审阅脚本，再执行 `bash duet.sh`。`duet.sh` 是本地管理入口，依赖同仓库的 `scripts/manage.py`、安装器与服务端源码；不能只下载单个脚本或使用 `curl .../duet.sh | bash` 安装。仓库目录不要放进安装目录。公开的是服务端源码与安装/管理脚本，仓库不提供 APK 或手机客户端下载。
 
-选择“1 安装”，按提示设置安装目录、公网 HTTPS origin、本地端口、用户服务名及首次账号。密码通过隐藏终端提示初始化，至少 12 字符。安装器不运行 sudo；TLS、域名和系统依赖由管理员准备。默认不启用可选桌面；需要时须先安装相应系统依赖。安装器创建独立 release 与 venv，并保留共享 data。选择无 systemd 时仅准备文件，按打印的前台命令启动。
+选择“1 安装”，按提示设置安装目录、公网 HTTPS origin、本地端口、服务名及首次账号。密码通过隐藏终端提示初始化，至少 12 字符。安装器不运行 sudo；TLS、域名和系统依赖由管理员准备。默认不启用可选桌面；需要时须先安装相应系统依赖。安装器创建独立 release 与 venv，并保留共享 data。选择无 systemd 时仅准备文件，按打印的前台命令启动。
 
 服务启动后选择“2 模型配置”，用本人服务器账号登录，即可新增、修改、切换模型，设置 OpenAI-compatible（Chat Completions / Responses）或 Anthropic、API 地址、模型名、key、输出 token 和兼容的推理/缓存选项。密钥输入隐藏；编辑时直接回车保留旧 key，清除必须使用独立菜单并输入 `CLEAR`。新增档案 `auto_approve=false`，编辑保留原有审批设置。高级参数、工具/语音/连接器设置仍可在 `https://你的域名/duet/admin` 调整。
 
@@ -33,7 +33,7 @@ bash duet.sh update   # 安装此 checkout 版本；不自动 git pull
 bash duet.sh --help
 ```
 
-菜单和所有命令默认使用 `$XDG_CONFIG_HOME/duet-manager/config.json`（未设置 XDG 时为 `~/.config/duet-manager/config.json`），仅保存 root/public_url/port/service/desktop/no_systemd，不保存密码、key 或 token；可用 `bash duet.sh --config /absolute/path/config.json models` 管理另一安装。
+菜单和所有命令默认使用 `$XDG_CONFIG_HOME/duet-manager/config.json`（未设置 XDG 时为 `~/.config/duet-manager/config.json`），仅保存 root/public_url/port/service/desktop/no_systemd；系统安装另存 scope/service_user，不保存密码、key 或 token；可用 `bash duet.sh --config /absolute/path/config.json models` 管理另一安装。
 
 已有安装可创建以下无秘密配置（路径、端口、service 和桌面选项必须与现有安装一致），再运行 models/status/update；不要对已有安装重新选择 install：
 
@@ -64,3 +64,11 @@ bash -n duet.sh installer/install-server.sh bootstrap-desktop.sh
 ```bash
 bash installer/install-server.sh --public-url https://duet.example.com --username owner --check
 ```
+
+### Root 登录安装与管理
+
+可直接在可信 checkout 目录运行 `bash duet.sh`。root 首次安装默认 `/opt/duet`，创建专用系统账号 `duet-server`（菜单可指定独立账号），安装 `/etc/systemd/system/<service>.service`，并用 system scope 管理启动、停止、状态和升级；不依赖 root 的用户会话或 linger。服务与可选桌面以专用非 root 账号运行并禁止获取新权限。venv、pip 及账号初始化同样降权执行；checkout 可以保留在 `/root`，安装器只复制必要文件，不开放 `/root`。模型配置继续通过本机 API 登录，密码和 key 仍使用隐藏输入。
+
+root 可直接运行 `bash installer/install-server.sh --public-url https://duet.example.com --username owner --check` 预检；预检不会创建账号、目录、unit 或启动服务。去掉 `--check` 执行安装。安装目录须位于 root 持有且其他用户不可写的路径下；已有专用账号必须明确属于该安装，外部账号、unit 和非空外部目录均拒绝接管。多份 root 安装分别指定不同 `--root`、`--service-user`、`--service` 和 `--port`。
+
+普通用户安装仍默认 `$HOME/.local/share/duet` 并使用 `systemctl --user`。旧管理配置默认 user scope，请使用原安装用户运行。root 的新配置保存 `"scope": "system"` 与 `"service_user": "duet-server"`；升级保留账号、模型和 data，停服后在安装目录创建私有备份，再安装当前 checkout。`--no-systemd` 只准备文件，root 须使用安装器打印的 `runuser ... setpriv --no-new-privs ...` 前台命令启动；不要用 root 直接启动服务 Python。
