@@ -8,10 +8,21 @@
 
 如自行给 systemd 服务增加 `RestrictAddressFamilies`，语音转换的 ZeroMQ 依赖可能还需要 `AF_NETLINK` 来枚举网络接口。已知部署限制：仅允许 `AF_INET AF_INET6 AF_UNIX` 时，ffmpeg 在接口解析阶段退出；保留其余限制并加入 `AF_NETLINK` 后，同样的 PCM/Opus 转换通过。随包安装器不设置这项限制；自定义服务应在实际运行用户和沙箱配置下验证转换，而不只在 SSH 终端检查 ffmpeg。
 
-将服务器 zip 解压到独立目录，例如 `$HOME/duet-package`；不要解压到安装目录或其子目录。包中应有 `bridge/`、`duet_server/`、`requirements.txt`、`bootstrap-desktop.sh`、`launch.py`、`installer/install-server.sh` 和本说明。用普通服务用户运行：
+此 GitHub 仓库已公开，仅提供服务端源码、安装器和管理脚本，不包含或提供 APK、手机源码、用户数据、账号或 provider key。准备 Git 后，用普通服务用户通过 HTTPS 拉取，无需 GitHub 登录或 token：
 
 ```bash
-cd "$HOME/duet-package"
+git clone https://github.com/iroha1145/duet.git "$HOME/duet-source"
+cd "$HOME/duet-source"
+# 审阅仓库中的脚本后运行
+bash duet.sh
+```
+
+选择“1 安装”完成安装；服务启动后选择“2 模型配置”新增或切换模型、API 地址和 key。以后可在此目录运行 `bash duet.sh models` 修改配置，运行 `bash duet.sh status` 查看状态。模型配置需登录自己的服务器账号，与 GitHub 登录无关。完整菜单、无秘密安装参数文件和管理命令见 [一键入口](README.md)。
+
+保持完整仓库：`duet.sh` 依赖同目录下的 `scripts/manage.py`、安装器与服务端源码，不能单独下载或用 `curl .../duet.sh | bash` 安装。源码目录不要放在安装目录或其子目录。以下是不用交互菜单的安装器入口，供需要显式参数或预检时使用；新安装选择一种入口即可：
+
+```bash
+cd "$HOME/duet-source"
 bash installer/install-server.sh --public-url https://duet.example.com --username owner --check
 bash installer/install-server.sh --public-url https://duet.example.com --username owner
 ```
@@ -157,10 +168,14 @@ tar -C "$HOME/.local/share/duet" -czf "$HOME/duet-data-backup.tar.gz" data
 
 请将示例归档名换为带日期的独立文件，避免覆盖唯一备份。若桌面仍有应用在写文件，备份 desktop 前也停止桌面 unit。
 
-新版本解压到另一个独立源目录，保留安装目录 `data/`，执行：
+使用交互菜单安装的服务，回到源码目录运行 `git pull --ff-only`，审阅更新后运行 `bash duet.sh update`；该命令会确认停服并先备份 data，且不自动拉取代码，详见 [后续操作](README.md#后续操作)。
+
+直接使用安装器的服务，保留安装目录 `data/`，更新独立源码目录后执行以下命令（如已按上文手动停服和备份，无需再运行菜单 update）：
 
 ```bash
-cd "$HOME/duet-package-new"
+cd "$HOME/duet-source"
+git pull --ff-only
+# 审阅更新后，预检并升级
 bash installer/install-server.sh --public-url https://duet.example.com --upgrade --check
 bash installer/install-server.sh --public-url https://duet.example.com --upgrade
 ```

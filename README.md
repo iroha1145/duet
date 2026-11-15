@@ -1,19 +1,18 @@
-# duet 私人自托管服务器
+# duet 个人自托管服务器
 
 一个账号、多设备同步的 Linux 服务端。此仓库包含服务端源码、管理页面、安装器与中文命令菜单，不包含 APK、手机源码、用户数据、账号或 provider key。
 
 ## 一键入口
 
-准备 Linux、Python 3.11+、venv/pip 和普通服务用户。使用你自己的 GitHub 身份认证访问私人仓库：
+准备 Linux、Git、Python 3.11+、venv/pip 和普通服务用户。此仓库已公开，使用 HTTPS 拉取无需 GitHub 账号、登录或 token：
 
 ```bash
-gh auth login
-gh repo clone iroha1145/duet
-cd duet
+git clone https://github.com/iroha1145/duet.git "$HOME/duet-source"
+cd "$HOME/duet-source"
 bash duet.sh
 ```
 
-也可使用已配置 SSH 身份的 `git clone git@github.com:iroha1145/duet.git`。私人仓库不能通过未认证的 raw curl 安装；先 clone、审阅脚本，再执行。仓库目录不要放进安装目录。
+先拉取完整仓库、审阅脚本，再执行 `bash duet.sh`。`duet.sh` 是本地管理入口，依赖同仓库的 `scripts/manage.py`、安装器与服务端源码；不能只下载单个脚本或使用 `curl .../duet.sh | bash` 安装。仓库目录不要放进安装目录。公开的是服务端源码与安装/管理脚本，仓库不提供 APK 或手机客户端下载。
 
 选择“1 安装”，按提示设置安装目录、公网 HTTPS origin、本地端口、用户服务名及首次账号。密码通过隐藏终端提示初始化，至少 12 字符。安装器不运行 sudo；TLS、域名和系统依赖由管理员准备。默认不启用可选桌面；需要时须先安装相应系统依赖。安装器创建独立 release 与 venv，并保留共享 data。选择无 systemd 时仅准备文件，按打印的前台命令启动。
 
@@ -24,6 +23,7 @@ bash duet.sh
 ## 后续操作
 
 ```bash
+cd "$HOME/duet-source"
 bash duet.sh models   # 随时修改/新增/切换模型及 key
 bash duet.sh status
 bash duet.sh start
