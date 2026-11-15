@@ -153,7 +153,9 @@ def validate(settings):
         raise OperatorError("端口须为 1024..65535")
     if type(settings["no_systemd"]) is not bool or type(settings["desktop"]) is not bool:
         raise OperatorError("安装选项无效")
-    return settings
+    # Match install-server.sh's os.path.abspath, without resolving symlinks.
+    # Normalize legacy saved values too, so unit ownership remains exact.
+    return {**settings, "root": os.path.abspath(settings["root"])}
 
 
 def save_settings(path, settings):
@@ -185,6 +187,7 @@ def installer_args(settings, upgrade=False):
 
 
 def service(settings, action):
+    settings = validate(settings)
     if settings["no_systemd"]:
         raise OperatorError("此安装为前台模式：使用安装器打印的命令启动，以 Ctrl-C 停止；无 systemd 状态管理")
     unit = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user" / (settings["service"] + ".service")

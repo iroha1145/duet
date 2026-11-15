@@ -96,6 +96,34 @@ class ManagerIntegration(unittest.TestCase):
 
 
 class SettingsTests(unittest.TestCase):
+    @unittest.skipUnless(__import__("os").name == "posix", "Linux installation paths")
+    def test_root_canonicalization_keeps_exact_service_ownership(self):
+        import os
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "install"
+            units = Path(directory) / "config/systemd/user"
+            units.mkdir(parents=True)
+            (units / "fixture.service").write_text("# duet-install-root: " + str(root) + "\n")
+            base = {"port": 48766, "service": "fixture", "public_url": "https://duet.example.com", "no_systemd": False, "desktop": False}
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(Path(directory) / "config")}), patch.object(manager.subprocess, "run") as run:
+                for spelling in (str(root), str(root) + "/", str(root.parent) + "/tmp/../install"):
+                    normalized = manager.validate({**base, "root": spelling})
+                    self.assertEqual(normalized["root"], str(root))
+                    manager.service({**base, "root": spelling}, "status")
+                self.assertEqual(run.call_count, 3)
+                # No substring or alias matching: a different root is still refused.
+                with self.assertRaises(manager.OperatorError):
+                    manager.service({**base, "root": str(root) + "-other"}, "start")
+                alias = Path(directory) / "alias"
+                root.mkdir()
+                alias.symlink_to(root, target_is_directory=True)
+                with self.assertRaises(manager.OperatorError):
+                    manager.service({**base, "root": str(alias)}, "start")
+                (units / "fixture.service").unlink()
+                (units / "fixture.service").symlink_to(Path(directory) / "foreign.service")
+                with self.assertRaises(manager.OperatorError):
+                    manager.service({**base, "root": str(root)}, "stop")
+
     def test_private_settings_and_no_secret_fields(self):
         import os
         with tempfile.TemporaryDirectory() as directory:
